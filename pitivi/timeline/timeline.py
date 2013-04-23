@@ -664,6 +664,7 @@ class Timeline(Gtk.VBox, Zoomable):
     def _createUi(self):
         self.embed = GtkClutter.Embed()
         self.stage = self.embed.get_stage()
+        perspective = self.stage.get_perspective()
 
         self.timeline = TimelineStage(self)
         self.controls = ControlContainer(self.timeline)
@@ -671,7 +672,9 @@ class Timeline(Gtk.VBox, Zoomable):
         self.shiftMask = False
         self.controlMask = False
 
-        # TODO: make the bg a gradient from (0, 0, 0, 255) to (50, 50, 50, 255)
+        perspective.fov_y = 90.
+        self.stage.set_perspective(perspective)
+
         self.stage.set_background_color(Clutter.Color.new(31, 30, 33, 255))
         self.timeline.set_position(CONTROL_WIDTH, 0)
         self.controls.set_position(0, 0)
@@ -1017,7 +1020,7 @@ class Timeline(Gtk.VBox, Zoomable):
     def _playPause(self, unused_action):
         self.app.current.pipeline.togglePlayback()
 
-    def _transposeXY(self, x, y):
+    def transposeXY(self, x, y):
         height = self.ruler.get_allocation().height
         x += self.timeline.get_scroll_point().x
         return x - CONTROL_WIDTH, y - height
@@ -1221,7 +1224,7 @@ class Timeline(Gtk.VBox, Zoomable):
                 if self.zoomed_fitted:
                     self._setBestZoomRatio()
                 else:
-                    x, y = self._transposeXY(x, y)
+                    x, y = self.transposeXY(x, y)
                     self.scrollToPosition(Zoomable.pixelToNs(x))
             else:
                 actor = self.stage.get_actor_at_pos(Clutter.PickMode.ALL, x, y)
@@ -1242,7 +1245,7 @@ class Timeline(Gtk.VBox, Zoomable):
             widget.drag_get_data(context, target, time)
             Gdk.drag_status(context, 0, time)
         else:
-            x, y = self._transposeXY(x, y)
+            x, y = self.transposeXY(x, y)
 
             # dragged from the media library
             if not self.timeline.ghostClips and self.isDraggedClip:
