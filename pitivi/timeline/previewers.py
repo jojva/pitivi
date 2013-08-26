@@ -35,6 +35,7 @@ import resource
 import sqlite3
 import sys
 import xdg.BaseDirectory as xdg_dirs
+import ipdb
 
 from pitivi.utils.signal import Signallable
 from pitivi.utils.loggable import Loggable
@@ -163,9 +164,11 @@ class VideoPreviewer(Clutter.ScrollActor, PreviewGenerator, Zoomable, Loggable):
         self.thumb_margin = BORDER_WIDTH
         self.thumb_height = EXPANDED_SIZE - 2 * self.thumb_margin
         self.thumb_width = None  # will be set by self._setupPipeline()
+        self.rate = 1
 
         # Maps (quantized) times to Thumbnail objects
         self.thumbs = {}
+#        ipdb.set_trace()
         self.thumb_cache = get_cache_for_uri(self.uri)
 
         # For CPU management
@@ -178,6 +181,8 @@ class VideoPreviewer(Clutter.ScrollActor, PreviewGenerator, Zoomable, Loggable):
         self.bElement.connect("notify::duration", self._durationChangedCb)
         self.bElement.connect("notify::in-point", self._inpointChangedCb)
         self.bElement.connect("notify::start", self._startChangedCb)
+#        self.bElement.connect("rate_changed", self._rateChangedCb)
+        self.bElement.connect("deep-notify", self._deepNotifiedCb)
 
         self.pipeline = None
         self.becomeControlled()
@@ -185,12 +190,16 @@ class VideoPreviewer(Clutter.ScrollActor, PreviewGenerator, Zoomable, Loggable):
     # Internal API
 
     def _update(self, unused_msg_source=None):
+        print "IN _UPDATE"
         if self._callback_id:
+            print "IN _UPDATE 1er if"
             GLib.source_remove(self._callback_id)
 
         if self.thumb_width:
+            print "IN _UPDATE 2eme if"
             self._addVisibleThumbnails()
             if self.wishlist:
+                print "IN _UPDATE 3eme if"
                 self.becomeControlled()
 
     def _setupPipeline(self):
@@ -204,7 +213,9 @@ class VideoPreviewer(Clutter.ScrollActor, PreviewGenerator, Zoomable, Loggable):
         self.pipeline = Gst.parse_launch(
             "uridecodebin uri={uri} name=decode ! "
             "videoconvert ! "
-            "videorate ! "
+            # "videorate rate=0.5 name=videoratep ! "
+            # "videorate ! "
+            "videorate name=videoratep ! "
             "videoscale method=lanczos ! "
             "capsfilter caps=video/x-raw,format=(string)RGBA,height=(int){height},"
             "pixel-aspect-ratio=(fraction)1/1,framerate=2/1 ! "
@@ -298,12 +309,12 @@ class VideoPreviewer(Clutter.ScrollActor, PreviewGenerator, Zoomable, Loggable):
     def _create_next_thumb(self):
         if not self.wishlist:
             # nothing left to do
-            self.debug("Thumbnails generation complete")
+            print "Thumbnails generation complete"
             self.stopGeneration()
             self.thumb_cache.commit()
             return
         else:
-            self.debug("Missing %d thumbs", len(self.wishlist))
+            print "Missing " + str(len(self.wishlist)) + " thumbs"
 
         wish = self._get_wish()
         if wish:
@@ -311,13 +322,13 @@ class VideoPreviewer(Clutter.ScrollActor, PreviewGenerator, Zoomable, Loggable):
             self.queue.remove(wish)
         else:
             time = self.queue.pop(0)
-        self.log('Creating thumb for "%s"' % filename_from_uri(self.uri))
+        print "Creating thumb for " + filename_from_uri(self.uri)
         # append the time to the end of the queue so that if this seek fails
         # another try will be started later
         self.queue.append(time)
         self.pipeline.seek(1.0,
             Gst.Format.TIME, Gst.SeekFlags.FLUSH | Gst.SeekFlags.ACCURATE,
-            Gst.SeekType.SET, time,
+            Gst.SeekType.SET, int(time * self.rate),
             Gst.SeekType.NONE, -1)
 
         # Remove the GSource
@@ -353,24 +364,31 @@ class VideoPreviewer(Clutter.ScrollActor, PreviewGenerator, Zoomable, Loggable):
         thumb_duration = max(thumb_duration, self.thumb_period)
 
         element_left, element_right = self._get_visible_range()
+
         # TODO: replace with a call to utils.misc.quantize:
         element_left = (element_left // thumb_duration) * thumb_duration
 
         current_time = element_left
+#        ipdb.set_trace()
         while current_time < element_right:
             thumb = Thumbnail(self.thumb_width, self.thumb_height)
             thumb.set_position(Zoomable.nsToPixel(current_time), self.thumb_margin)
             self.add_child(thumb)
             self.thumbs[current_time] = thumb
-            if current_time in self.thumb_cache:
-                gdkpixbuf = self.thumb_cache[current_time]
+            if current_time * self.rate in self.thumb_cache:
+#            if current_time in self.thumb_cache:
+                print "WISHLIST GOOD " + str(current_time) + " at rate " + str(self.rate) + " for a total of " + str(current_time * self.rate)
+#                gdkpixbuf = self.thumb_cache[current_time]
+                gdkpixbuf = self.thumb_cache[current_time * self.rate]
                 if self._allAnimated or current_time not in old_thumbs:
                     self.thumbs[current_time].set_from_gdkpixbuf_animated(gdkpixbuf)
                 else:
                     self.thumbs[current_time].set_from_gdkpixbuf(gdkpixbuf)
             else:
+                print "WISHLIST UPGRADE " + str(current_time) + " at rate " + str(self.rate) + " for a total of " + str(current_time * self.rate)
                 self.wishlist.append(current_time)
             current_time += thumb_duration
+#        ipdb.set_trace()
         self._allAnimated = False
 
     def _get_wish(self):
@@ -390,13 +408,15 @@ class VideoPreviewer(Clutter.ScrollActor, PreviewGenerator, Zoomable, Loggable):
         # => also see gst-plugins-good/tests/icles/gdkpixbufsink-test
         # => Daniel: It is *not* nanosecond precise when we remove the videorate
         #            element from the pipeline
+#        ipdb.set_trace()
+        print time
         if time in self.queue:
             self.queue.remove(time)
 
-        self.thumb_cache[time] = thumbnail
+        self.thumb_cache[time / self.rate] = thumbnail
 
-        if time in self.thumbs:
-            self.thumbs[time].set_from_gdkpixbuf_animated(thumbnail)
+        if time / self.rate in self.thumbs:
+            self.thumbs[time / self.rate].set_from_gdkpixbuf_animated(thumbnail)
 
     # Interface (Zoomable)
 
@@ -462,6 +482,7 @@ class VideoPreviewer(Clutter.ScrollActor, PreviewGenerator, Zoomable, Loggable):
     # Callbacks
 
     def bus_message_handler(self, unused_bus, message):
+#        ipdb.set_trace()
         if message.type == Gst.MessageType.ELEMENT and \
                 message.src == self.gdkpixbufsink:
             struct = message.get_structure()
@@ -495,6 +516,16 @@ class VideoPreviewer(Clutter.ScrollActor, PreviewGenerator, Zoomable, Loggable):
         new_duration = max(self.duration, self.bElement.props.duration)
         if new_duration > self.duration:
             self.duration = new_duration
+            self._update()
+
+    def _deepNotifiedCb(self, propObject, prop, data):
+#        ipdb.set_trace()
+        print "PROUT"
+#        if prop.factory.name == "videorate":
+#        if prop.props.name == "videorate":
+        if prop.props.rate:
+            print "PROUT INSIDE"
+            self.rate = prop.props.rate
             self._update()
 
     def startGeneration(self):

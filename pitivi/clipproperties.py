@@ -39,7 +39,7 @@ from pitivi.dialogs.depsmanager import DepsManager
 from pitivi.utils.ui import EFFECT_TARGET_ENTRY
 from pitivi.utils.loggable import Loggable
 from pitivi.utils.ui import PADDING, SPACING
-from pitivi.utils.widgets import GstElementSettingsWidget
+from pitivi.utils.widgets import GstElementSettingsWidget, NumericWidget
 
 from pitivi.effects import AUDIO_EFFECT, VIDEO_EFFECT, HIDDEN_EFFECTS, \
     EffectsPropertiesManager
@@ -82,8 +82,10 @@ class ClipProperties(Gtk.ScrolledWindow, Loggable):
         self.infobar_box = Gtk.VBox()
         effect_properties_handling = EffectsPropertiesManager(instance)
         self.effect_expander = EffectProperties(instance, effect_properties_handling, self)
+        self.rate_expander = RateProperties(instance, self)
         self.transformation_expander = TransformationProperties(instance, instance.action_log)
         self.effect_expander.set_vexpand(False)
+        self.rate_expander.set_vexpand(False)
         self.transformation_expander.set_vexpand(False)
 
         vbox = Gtk.VBox()
@@ -91,6 +93,7 @@ class ClipProperties(Gtk.ScrolledWindow, Loggable):
         vbox.pack_start(self.infobar_box, False, True, 0)
         vbox.pack_start(self.transformation_expander, False, True, 0)
         vbox.pack_start(self.effect_expander, True, True, 0)
+        vbox.pack_start(self.rate_expander, True, True, 0)
 
         viewport = Gtk.Viewport()
         viewport.add(vbox)
@@ -104,6 +107,7 @@ class ClipProperties(Gtk.ScrolledWindow, Loggable):
         self._project = project
         if project:
             self.effect_expander._connectTimelineSelection(self.app.gui.timeline_ui.timeline)
+            self.rate_expander.timeline = self.app.gui.timeline_ui.timeline
             if self.transformation_expander:
                 self.transformation_expander.timeline = self.app.gui.timeline_ui.timeline
 
@@ -129,6 +133,46 @@ class ClipProperties(Gtk.ScrolledWindow, Loggable):
         self._timeline = timeline
 
     timeline = property(_getTimeline, _setTimeline)
+
+
+class RateProperties(Gtk.Expander, Loggable):  # , Signallable):
+    """
+    Widget for viewing and configuring effects
+    """
+    # Note: This should be inherited from Gtk.Expander when we get other things
+    # to put in ClipProperties, that is why this is done this way
+
+#    __signals__ = {
+#        "rate_changed": []}
+
+    def __init__(self, instance, clip_properties):
+        # Set up the expander widget that will contain everything:
+        Gtk.Expander.__init__(self)
+        self.set_expanded(False)
+        self.set_label(_("Rate"))
+        Loggable.__init__(self)
+
+        # Global variables related to rate
+        self.app = instance
+        self.settings = instance.settings
+
+        self.clip_properties = clip_properties
+        self._config_ui_h_pos = None
+        self._vcontent = Gtk.VBox()
+        self.add(self._vcontent)
+        self._spinWidget = NumericWidget(16, 0.01)
+        self._spinWidget.setWidgetValue(1.0)
+        self._spinWidget.connectValueChanged(self._valueChangedCb, None)
+        self._vcontent.pack_start(self._spinWidget, True, True, True)
+        self.show_all()
+
+    def _valueChangedCb(self, adjustment, user_param_unused):
+        self.list = self.timeline.selection.getSelectedTrackElements()
+        for source in self.list:
+            if source.get_track_type() == GES.TrackType.VIDEO:
+                source.set_child_property("rate", adjustment.get_value())
+#                self.emit("rate_changed")
+                break
 
 
 class EffectProperties(Gtk.Expander, Loggable):
